@@ -29,6 +29,13 @@ def create_ceremony(data: CeremonyCreate):
 def get_ceremonies():
     return list(ceremonies.values())
 
+@router.post("/{ceremony_id}/token")
+def get_ceremony_token(
+    ceremony_id: str,
+        role: str = "viewer",
+            x_admin_secret: str = Header(default="")
+            ):
+            
 @router.get("/{ceremony_id}")
 def get_ceremony(ceremony_id: str):
 
