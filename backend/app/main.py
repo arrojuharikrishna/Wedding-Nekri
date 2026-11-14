@@ -1,7 +1,9 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.routes.ceremonies import router as ceremony_router
+from dotenv import load_dotenv
 
+load_dotenv()
 app = FastAPI(
     title="Ceremony Broadcast API",
     description="Personal live ceremony broadcasting platform",
