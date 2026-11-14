@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.routes.ceremonies import router as ceremony_router
+from app.routes.google import router as google_router
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -19,7 +20,7 @@ app.add_middleware(
 )
 
 app.include_router(ceremony_router, prefix="/api")
-
+app.include_router(google_router)
 @app.get("/")
 def home():
     return {
