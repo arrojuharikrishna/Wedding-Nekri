@@ -2,19 +2,21 @@
 import os
 import secrets
 
-from pathlib import Path
 from fastapi import APIRouter, HTTPException, Header, Request
 from fastapi.responses import RedirectResponse
 from google_auth_oauthlib.flow import Flow
+
 from app.services.azure_transfer import transfer_recording_to_drive
 from app.services.google_drive import SCOPES, get_token_path
 
+
 router = APIRouter(tags=["Google Drive"])
 
+# Stores the PKCE verifier against each OAuth state.
 oauth_states = {}
 
 
-def create_flow(state=None):
+def create_flow(state=None, code_verifier=None, auto_generate=False):
 
     client_config = {
         "web": {
@@ -31,7 +33,9 @@ def create_flow(state=None):
     flow = Flow.from_client_config(
         client_config,
         scopes=SCOPES,
-        state=state
+        state=state,
+        code_verifier=code_verifier,
+        autogenerate_code_verifier=auto_generate
     )
 
     flow.redirect_uri = os.getenv("GOOGLE_REDIRECT_URI")
@@ -43,15 +47,21 @@ def create_flow(state=None):
 def google_authorize():
 
     state = secrets.token_urlsafe(32)
-    oauth_states[state] = True
 
-    flow = create_flow(state=state)
+    # Generate a PKCE verifier for this authorization.
+    flow = create_flow(
+        state=state,
+        auto_generate=True
+    )
 
     url, _ = flow.authorization_url(
         access_type="offline",
         include_granted_scopes="true",
         prompt="consent"
     )
+
+    # Preserve the verifier until Google's callback arrives.
+    oauth_states[state] = flow.code_verifier
 
     return RedirectResponse(url)
 
@@ -69,16 +79,34 @@ def google_callback(request: Request):
             detail="Google authorization was not completed"
         )
 
-    if not state or state not in oauth_states or not code:
+    if not state or not code or state not in oauth_states:
         raise HTTPException(
             status_code=400,
             detail="Invalid OAuth state or authorization code"
         )
 
-    oauth_states.pop(state, None)
+    # Retrieve the original PKCE verifier.
+    code_verifier = oauth_states.pop(state)
 
-    flow = create_flow(state=state)
-    flow.fetch_token(code=code)
+    if not code_verifier:
+        raise HTTPException(
+            status_code=400,
+            detail="OAuth code verifier is missing. Please authorize again."
+        )
+
+    # Recreate the flow with the original verifier.
+    flow = create_flow(
+        state=state,
+        code_verifier=code_verifier
+    )
+
+    try:
+        flow.fetch_token(code=code)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Google token exchange failed: {type(exc).__name__}"
+        )
 
     credentials = flow.credentials
 
@@ -101,13 +129,12 @@ def google_status():
         "connected": token_path.exists()
     }
 
+
 @router.post("/api/ceremonies/{ceremony_id}/drive/upload")
 def upload_ceremony_to_drive(
     ceremony_id: str,
     x_admin_secret: str = Header(default="")
 ):
-
-    import secrets
 
     admin_secret = os.getenv("ADMIN_BROADCAST_SECRET")
 
